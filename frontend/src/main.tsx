@@ -1,7 +1,16 @@
-import { DashboardPage } from "./pages/DashboardPage";
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import "./index.css";
+import App from "./App";
 
-function App() {
-  return <DashboardPage />;
+const rootElement = document.getElementById("root");
+
+if (!rootElement) {
+  throw new Error("Root element not found in index.html");
 }
 
-export default App;
+createRoot(rootElement).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);

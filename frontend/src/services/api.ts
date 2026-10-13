@@ -1,4 +1,13 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+
+export async function checkBackendHealth(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/health`, { method: "GET" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 export async function createMeeting(sourceUrl?: string, file?: File, language: string = "english") {
   const formData = new FormData();
@@ -10,7 +19,10 @@ export async function createMeeting(sourceUrl?: string, file?: File, language: s
     method: "POST",
     body: formData,
   });
-  if (!res.ok) throw new Error("Failed to start processing meeting.");
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || "Failed to start processing meeting.");
+  }
   return res.json();
 }
 

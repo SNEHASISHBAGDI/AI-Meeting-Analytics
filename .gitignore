@@ -1,4 +1,3 @@
-@'
 # Environment secrets
 .env
 .env.*
@@ -12,16 +11,20 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+backend/.venv/
 
 # Node.js
 node_modules/
 dist/
 
-# Generated files
+# Generated files and local data
 downloads/
 downloades/
+backend/downloades/
 vector_db/
 *.wav
 *.mp3
 *.mp4
-'@ | Set-Content ".gitignore"
+
+# Generated VS Code files
+.vscode/copy-all-files/

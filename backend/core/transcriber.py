@@ -1,19 +1,22 @@
-import whisper
 import os
+import time
+
 import requests
+import whisper
 from pydub import AudioSegment
 
 # Sarvam's sync STT-translate API rejects audio longer than 30s.
-# We slice each chunk into 25s pieces (with a 5s safety margin) before sending.
-SARVAM_PIECE_SECONDS = 25
-
+# We slice each chunk into shorter pieces with a larger safety margin to reduce
+# timeouts and upstream 504s on slower connections.
+SARVAM_PIECE_SECONDS = max(10, int(os.getenv("SARVAM_PIECE_SECONDS", "15")))
+SARVAM_TIMEOUT_SECONDS = max(60, int(os.getenv("SARVAM_TIMEOUT_SECONDS", "180")))
+SARVAM_MAX_RETRIES = max(1, int(os.getenv("SARVAM_MAX_RETRIES", "3")))
 
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 
-
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
-SARVAM_STT_TRANSLATE_URL = "https://api.sarvam.ai/speech-to-text-translate"
-SARVAM_MODEL = os.getenv("SARVAM_STT_MODEL", "saaras:v2.5")
+SARVAM_STT_URL = "https://api.sarvam.ai/speech-to-text"
+SARVAM_MODEL = os.getenv("SARVAM_STT_MODEL", "saaras:v3")
 
 _model = None
 
@@ -38,32 +41,57 @@ def transcribe_chunk_whisper(chunk_path: str) -> str:
 
 
 def _send_to_sarvam(piece_path: str) -> str:
-    """Send one ≤30s WAV file to Sarvam and return the English transcript."""
+    """Send one short WAV file to Sarvam and return the English transcript."""
     headers = {"api-subscription-key": SARVAM_API_KEY}
+    data = {"model": SARVAM_MODEL, "mode": "translate"}
 
-    with open(piece_path, "rb") as f:
-        files = {"file": (os.path.basename(piece_path), f, "audio/wav")}
-        data = {"model": SARVAM_MODEL, "with_diarization": "false"}
-        response = requests.post(
-            SARVAM_STT_TRANSLATE_URL,
-            headers=headers,
-            files=files,
-            data=data,
-            timeout=120,
-        )
+    for attempt in range(1, SARVAM_MAX_RETRIES + 1):
+        try:
+            # Reopen the file on every retry; requests consumes the stream.
+            with open(piece_path, "rb") as f:
+                files = {"file": (os.path.basename(piece_path), f, "audio/wav")}
+                response = requests.post(
+                    SARVAM_STT_URL,
+                    headers=headers,
+                    files=files,
+                    data=data,
+                    timeout=SARVAM_TIMEOUT_SECONDS,
+                )
+            if response.ok:
+                return response.json().get("transcript", "")
 
-    if not response.ok:
-        print(f"\n❌ Sarvam returned {response.status_code}")
-        print(f"Response body: {response.text}\n")
-        response.raise_for_status()
+            error = (
+                f"Sarvam returned {response.status_code}: {response.text[:1000]}"
+            )
+            if response.status_code not in {408, 429, 500, 502, 503, 504}:
+                raise RuntimeError(error)
+            if attempt == SARVAM_MAX_RETRIES:
+                raise RuntimeError(
+                    f"Sarvam request failed after {attempt} attempts: {error}"
+                )
+            print(
+                f"\n⚠️ Sarvam temporary failure "
+                f"(attempt {attempt}/{SARVAM_MAX_RETRIES}): {error}\n"
+            )
+        except requests.RequestException as exc:
+            if attempt == SARVAM_MAX_RETRIES:
+                raise RuntimeError(
+                    f"Sarvam request failed after {attempt} attempts: {exc}"
+                ) from exc
+            print(
+                f"\n⚠️ Sarvam request failed "
+                f"(attempt {attempt}/{SARVAM_MAX_RETRIES}): {exc}\n"
+            )
 
-    return response.json().get("transcript", "")
+        time.sleep(min(2 ** attempt, 10))
+
+    raise RuntimeError("Sarvam request failed without returning a response.")
 
 
 def transcribe_chunk_sarvam(chunk_path: str) -> str:
     """
-    Sarvam sync API only accepts ≤30s audio. We split this chunk into
-    25-second pieces, send each separately, and join the transcripts.
+    Sarvam sync API only accepts short audio. We split each chunk into
+    smaller pieces to reduce upstream timeout/504 errors.
     """
     if not SARVAM_API_KEY:
         raise RuntimeError("SARVAM_API_KEY is not set in environment / .env")

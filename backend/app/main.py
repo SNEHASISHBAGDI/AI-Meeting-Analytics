@@ -5,9 +5,14 @@ import os
 current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.dirname(current_dir)
 if backend_dir not in sys.path:
-    sys.path.append(backend_dir)
+    sys.path.insert(0, backend_dir)
+
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(backend_dir, ".env"))
 
 import uuid
+import logging
 from fastapi import FastAPI, BackgroundTasks, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -22,6 +27,8 @@ from core.vector_store import build_vector_store, load_vector_store, get_retriev
 from core.rag_engine import format_docs
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from utils.exporter import generate_pdf_report
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Meeting Intelligence API", version="1.0.0")
 
@@ -121,6 +128,7 @@ def process_meeting_pipeline(meeting_id: str, source: str, language: str):
             "questions": questions
         })
     except Exception as e:
+        logger.exception("Meeting processing failed for %s", meeting_id)
         JOBS_STORE[meeting_id].update({
             "status": "failed",
             "progress": str(e)
