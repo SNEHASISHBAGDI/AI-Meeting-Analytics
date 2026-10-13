@@ -46,3 +46,5 @@ requests>=2.32.0
 fastapi[standard]
 
 langchain-google-genai
+langchain-chroma
+chromadb
